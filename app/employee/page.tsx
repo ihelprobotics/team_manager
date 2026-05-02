@@ -5,324 +5,287 @@ import { useRouter } from 'next/navigation'
 
 type TaskStatus = 'To Do' | 'In Progress' | 'Done' | 'Blocked'
 
-interface User {
-  id: string; name: string; avatar_initials: string; avatar_color: string
-}
+interface User { id: string; name: string; avatar_initials: string; avatar_color: string; email: string }
 interface Task {
   id: string; title: string; description?: string; status: TaskStatus
   priority: string; progress: number; notes?: string; tag?: string
   due_date?: string; attention_needed: boolean; attention_reason?: string
   assignee?: User; helper?: User; assignee_id?: string; helper_id?: string
 }
-interface Session { id: string; name: string; avatar_initials: string; avatar_color: string; email: string }
-interface WorkSession { id: string; started_at: string; ended_at?: string; duration_seconds?: number }
+interface WorkSession { id: string; started_at: string }
 interface ChatMsg { role: 'user' | 'assistant'; content: string; updates?: TaskUpdate[] }
-interface TaskUpdate {
-  taskId: string; taskTitle: string; newStatus: TaskStatus; newProgress: number
-  notes: string; statusChange?: { from: TaskStatus; to: TaskStatus }; progressChange?: { from: number; to: number }
-}
+interface TaskUpdate { taskId: string; taskTitle: string; newStatus: TaskStatus; newProgress: number; notes: string; statusChange?: { from: TaskStatus; to: TaskStatus }; progressChange?: { from: number; to: number } }
 
 function formatSeconds(s: number) {
-  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60
   return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`
 }
 
-function StatusBadge({ status }: { status: TaskStatus }) {
-  const map = {
-    'To Do': 'bg-gray-100 text-gray-600',
-    'In Progress': 'bg-blue-100 text-blue-700',
-    'Done': 'bg-green-100 text-green-700',
-    'Blocked': 'bg-red-100 text-red-700',
-  }
-  return <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${map[status]}`}>{status}</span>
+function statusBadgeClass(s: TaskStatus) {
+  if (s==='To Do') return 'badge-todo'
+  if (s==='In Progress') return 'badge-inprogress'
+  if (s==='Done') return 'badge-done'
+  return 'badge-blocked'
 }
 
-function PriorityDot({ p }: { p: string }) {
-  const c = p === 'High' ? 'bg-red-500' : p === 'Medium' ? 'bg-amber-500' : 'bg-green-500'
-  return <span className={`inline-block w-1.5 h-1.5 rounded-full ${c}`} />
+function Avatar({ initials, color, size=32 }: { initials:string; color:string; size?:number }) {
+  return (
+    <div className="avatar" style={{ width:size, height:size, background:color+'22', color, fontSize:size*0.36, border:`1px solid ${color}44`, flexShrink:0 }}>
+      {initials}
+    </div>
+  )
 }
 
 export default function EmployeeDashboard() {
   const router = useRouter()
-  const [user, setUser] = useState<Session | null>(null)
+  const [user, setUser] = useState<User|null>(null)
   const [tasks, setTasks] = useState<Task[]>([])
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'chat'>('dashboard')
-  const [workSession, setWorkSession] = useState<WorkSession | null>(null)
-  const [timerSeconds, setTimerSeconds] = useState(0)
+  const [tab, setTab] = useState<'dashboard'|'chat'>('dashboard')
+  const [workSession, setWorkSession] = useState<WorkSession|null>(null)
+  const [timerSec, setTimerSec] = useState(0)
   const [totalToday, setTotalToday] = useState(0)
-  const [timerRunning, setTimerRunning] = useState(false)
-  const [chatMessages, setChatMessages] = useState<ChatMsg[]>([])
+  const [timerOn, setTimerOn] = useState(false)
+  const [chatMsgs, setChatMsgs] = useState<ChatMsg[]>([])
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const timerRef = useRef<NodeJS.Timeout | null>(null)
-  const chatHistoryRef = useRef<ChatMsg[]>([])
+  const [expandedTask, setExpandedTask] = useState<string|null>(null)
+  const msgsEndRef = useRef<HTMLDivElement>(null)
+  const timerRef = useRef<NodeJS.Timeout|null>(null)
+  const historyRef = useRef<ChatMsg[]>([])
 
   useEffect(() => {
-    fetch('/api/auth/me').then(r => r.json()).then(d => {
+    fetch('/api/auth/me').then(r=>r.json()).then(d => {
       if (!d.user) { router.push('/login'); return }
       setUser(d.user)
     })
   }, [router])
 
   const loadTasks = useCallback(async () => {
-    const r = await fetch('/api/tasks')
-    const d = await r.json()
-    setTasks(d.tasks || [])
+    const r = await fetch('/api/tasks'); const d = await r.json(); setTasks(d.tasks||[])
   }, [])
 
   const loadSession = useCallback(async () => {
-    const r = await fetch('/api/sessions')
-    const d = await r.json()
-    setTotalToday(d.totalSeconds || 0)
+    const r = await fetch('/api/sessions'); const d = await r.json()
+    setTotalToday(d.totalSeconds||0)
     if (d.active) {
       setWorkSession(d.active)
-      const elapsed = Math.floor((Date.now() - new Date(d.active.started_at).getTime()) / 1000)
-      setTimerSeconds(elapsed)
-      setTimerRunning(true)
+      setTimerSec(Math.floor((Date.now()-new Date(d.active.started_at).getTime())/1000))
+      setTimerOn(true)
     }
   }, [])
 
   const loadChat = useCallback(async () => {
-    const r = await fetch('/api/chat')
-    const d = await r.json()
+    const r = await fetch('/api/chat'); const d = await r.json()
     if (d.messages?.length) {
-      const msgs = d.messages.map((m: { role: 'user'|'assistant'; content: string; task_updates?: TaskUpdate[] }) => ({
-        role: m.role, content: m.content, updates: m.task_updates
-      }))
-      setChatMessages(msgs)
-      chatHistoryRef.current = msgs
+      const msgs = d.messages.map((m: {role:'user'|'assistant';content:string;task_updates?:TaskUpdate[]}) => ({ role:m.role, content:m.content, updates:m.task_updates }))
+      setChatMsgs(msgs); historyRef.current = msgs
     }
   }, [])
 
-  useEffect(() => {
-    if (user) { loadTasks(); loadSession(); loadChat() }
-  }, [user, loadTasks, loadSession, loadChat])
+  useEffect(() => { if (user) { loadTasks(); loadSession(); loadChat() } }, [user, loadTasks, loadSession, loadChat])
 
-  // Timer tick
   useEffect(() => {
-    if (timerRunning) {
-      timerRef.current = setInterval(() => setTimerSeconds(s => s + 1), 1000)
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current)
-    }
+    if (timerOn) { timerRef.current = setInterval(() => setTimerSec(s=>s+1), 1000) }
+    else if (timerRef.current) clearInterval(timerRef.current)
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
-  }, [timerRunning])
+  }, [timerOn])
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [chatMessages])
+  useEffect(() => { msgsEndRef.current?.scrollIntoView({ behavior:'smooth' }) }, [chatMsgs])
 
   async function toggleTimer() {
-    if (!timerRunning) {
-      const r = await fetch('/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'start' }) })
-      const d = await r.json()
-      setWorkSession(d.session)
-      setTimerSeconds(0)
-      setTimerRunning(true)
+    if (!timerOn) {
+      const r = await fetch('/api/sessions', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'start'}) })
+      const d = await r.json(); setWorkSession(d.session); setTimerSec(0); setTimerOn(true)
     } else {
-      await fetch('/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'stop' }) })
-      setTotalToday(p => p + timerSeconds)
-      setWorkSession(null)
-      setTimerRunning(false)
-      setTimerSeconds(0)
+      await fetch('/api/sessions', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'stop'}) })
+      setTotalToday(p=>p+timerSec); setWorkSession(null); setTimerOn(false); setTimerSec(0)
     }
   }
 
   async function sendChat() {
     if (!chatInput.trim() || chatLoading) return
-    const text = chatInput.trim()
-    setChatInput('')
-    const userMsg: ChatMsg = { role: 'user', content: text }
-    const newMsgs = [...chatHistoryRef.current, userMsg]
-    setChatMessages(newMsgs)
-    chatHistoryRef.current = newMsgs
-    setChatLoading(true)
-
-    const r = await fetch('/api/chat', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, history: chatHistoryRef.current.slice(-10) })
-    })
+    const text = chatInput.trim(); setChatInput('')
+    const userMsg: ChatMsg = { role:'user', content:text }
+    const newMsgs = [...historyRef.current, userMsg]
+    setChatMsgs(newMsgs); historyRef.current = newMsgs; setChatLoading(true)
+    const r = await fetch('/api/chat', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ message:text, history:historyRef.current.slice(-10) }) })
     const d = await r.json()
-    const aiMsg: ChatMsg = { role: 'assistant', content: d.reply, updates: d.updates }
-    const updated = [...chatHistoryRef.current, aiMsg]
-    setChatMessages(updated)
-    chatHistoryRef.current = updated
-    setChatLoading(false)
+    const aiMsg: ChatMsg = { role:'assistant', content:d.reply, updates:d.updates }
+    const updated = [...historyRef.current, aiMsg]
+    setChatMsgs(updated); historyRef.current = updated; setChatLoading(false)
     if (d.updates?.length) loadTasks()
   }
 
   async function logout() {
-    if (timerRunning) await fetch('/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'stop' }) })
-    await fetch('/api/auth/logout', { method: 'POST' })
-    router.push('/login')
+    if (timerOn) await fetch('/api/sessions', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'stop'}) })
+    await fetch('/api/auth/logout', { method:'POST' }); router.push('/login')
   }
 
-  const myTasks = tasks.filter(t => t.assignee_id === user?.id)
-  const helperTasks = tasks.filter(t => t.helper_id === user?.id && t.assignee_id !== user?.id)
-  const attentionTasks = myTasks.filter(t => t.attention_needed)
-  const completedPct = myTasks.length ? Math.round(myTasks.filter(t => t.status === 'Done').length / myTasks.length * 100) : 0
+  const myTasks = tasks.filter(t=>t.assignee_id===user?.id)
+  const helperTasks = tasks.filter(t=>t.helper_id===user?.id && t.assignee_id!==user?.id)
+  const attentionTasks = myTasks.filter(t=>t.attention_needed)
+  const donePct = myTasks.length ? Math.round(myTasks.filter(t=>t.status==='Done').length/myTasks.length*100) : 0
 
   if (!user) return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="text-sm text-gray-500">Loading...</div>
+    <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+      <div style={{ width:'32px', height:'32px', border:'2px solid var(--border2)', borderTopColor:'var(--accent)', borderRadius:'50%' }} className="animate-spin-slow" />
     </div>
   )
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between sticky top-0 z-10">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 11l3 3L22 4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+    <div style={{ minHeight:'100vh', background:'var(--bg)', fontFamily:"'DM Sans',sans-serif" }}>
+
+      {/* Topbar */}
+      <div className="topbar">
+        <div style={{ display:'flex', alignItems:'center', gap:'24px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+            <div style={{ width:'32px', height:'32px', borderRadius:'10px', background:'linear-gradient(135deg,var(--accent),#8b85ff)', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 4px 12px var(--accent-glow)' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 11l3 3L22 4" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </div>
-            <span className="font-semibold text-gray-900 text-sm">TaskFlow</span>
+            <span style={{ fontWeight:'600', fontSize:'15px', color:'var(--text)', letterSpacing:'-0.3px' }}>TaskFlow</span>
           </div>
-          <nav className="flex gap-1">
-            {(['dashboard', 'chat'] as const).map(t => (
-              <button key={t} onClick={() => setActiveTab(t)}
-                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors capitalize ${activeTab === t ? 'bg-gray-100 text-gray-900' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}>
-                {t === 'chat' ? 'Update via Chat' : 'My Tasks'}
-              </button>
-            ))}
+          <nav style={{ display:'flex', gap:'4px' }}>
+            <button className={`nav-tab ${tab==='dashboard'?'active':''}`} onClick={()=>setTab('dashboard')}>My Tasks</button>
+            <button className={`nav-tab ${tab==='chat'?'active':''}`} onClick={()=>setTab('chat')}>
+              Update via Chat
+              {chatMsgs.length===0 && <span style={{ marginLeft:'6px', background:'var(--accent)', color:'white', fontSize:'10px', padding:'1px 5px', borderRadius:'10px' }}>AI</span>}
+            </button>
           </nav>
         </div>
-        <div className="flex items-center gap-3">
+
+        <div style={{ display:'flex', alignItems:'center', gap:'12px' }}>
           {/* Timer */}
-          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-mono ${timerRunning ? 'bg-green-50 border-green-200 text-green-700' : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
-            <div className={`w-1.5 h-1.5 rounded-full ${timerRunning ? 'bg-green-500 animate-attention' : 'bg-gray-400'}`} />
-            {formatSeconds(timerSeconds)}
+          <div style={{ display:'flex', alignItems:'center', gap:'8px', background:'var(--bg4)', border:`1px solid ${timerOn?'rgba(34,211,160,0.3)':'var(--border)'}`, borderRadius:'10px', padding:'7px 14px' }}>
+            <div style={{ width:'7px', height:'7px', borderRadius:'50%', background:timerOn?'var(--green)':'var(--text3)', flexShrink:0 }} className={timerOn?'animate-pulse-dot':''} />
+            <span style={{ fontFamily:"'DM Mono',monospace", fontSize:'13px', color:timerOn?'var(--green)':'var(--text2)', letterSpacing:'0.05em' }}>{formatSeconds(timerSec)}</span>
           </div>
-          <button onClick={toggleTimer}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${timerRunning ? 'bg-red-50 text-red-700 hover:bg-red-100 border border-red-200' : 'bg-green-600 text-white hover:bg-green-700'}`}>
-            {timerRunning ? 'Clock Out' : 'Clock In'}
+          <button onClick={toggleTimer} className={timerOn?'btn-ghost':''} style={timerOn ? { borderColor:'rgba(244,63,94,0.3)', color:'var(--red)', fontSize:'13px' } : { background:'var(--green)', color:'var(--bg)', border:'none', borderRadius:'10px', padding:'8px 16px', fontSize:'13px', fontWeight:'600', cursor:'pointer', transition:'all 0.2s', fontFamily:"'DM Sans',sans-serif" }}>
+            {timerOn ? 'Clock Out' : '▶ Clock In'}
           </button>
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium text-white" style={{ background: user.avatar_color }}>
-              {user.avatar_initials}
-            </div>
-            <span className="text-sm text-gray-700">{user.name}</span>
+          <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+            <Avatar initials={user.avatar_initials} color={user.avatar_color} size={30} />
+            <span style={{ fontSize:'13px', color:'var(--text2)' }}>{user.name}</span>
           </div>
-          <button onClick={logout} className="text-sm text-gray-400 hover:text-gray-600 transition-colors">Sign out</button>
+          <button onClick={logout} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text3)', fontSize:'13px', fontFamily:"'DM Sans',sans-serif' " }}>Sign out</button>
         </div>
-      </header>
+      </div>
 
       {/* Attention banner */}
-      {attentionTasks.length > 0 && (
-        <div className="bg-amber-50 border-b border-amber-200 px-6 py-2.5 flex items-center gap-3">
-          <div className="flex items-center gap-1.5">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="text-amber-600"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="12" y1="9" x2="12" y2="13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><line x1="12" y1="17" x2="12.01" y2="17" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
-            <span className="text-sm font-medium text-amber-800">
-              {attentionTasks.length} task{attentionTasks.length > 1 ? 's' : ''} need attention
-            </span>
+      {attentionTasks.length>0 && (
+        <div style={{ padding:'12px 24px', background:'linear-gradient(135deg,rgba(244,63,94,0.06),rgba(244,63,94,0.02))', borderBottom:'1px solid rgba(244,63,94,0.15)' }}>
+          <div style={{ maxWidth:'1280px', margin:'0 auto', display:'flex', alignItems:'center', gap:'12px' }}>
+            <span style={{ color:'var(--red)', fontSize:'14px' }} className="animate-pulse-dot">⚠</span>
+            <span style={{ fontSize:'13px', fontWeight:'500', color:'var(--red)' }}>{attentionTasks.length} task{attentionTasks.length>1?'s':''} flagged for attention —</span>
+            <span style={{ fontSize:'13px', color:'rgba(244,63,94,0.7)' }}>{attentionTasks.map(t=>t.title).join(' · ')}</span>
           </div>
-          <span className="text-sm text-amber-700">{attentionTasks.map(t => t.title).join(' · ')}</span>
         </div>
       )}
 
-      <main className="flex-1 p-6 max-w-7xl mx-auto w-full">
+      <main style={{ maxWidth:'1280px', margin:'0 auto', padding:'28px 24px' }}>
 
-        {activeTab === 'dashboard' && (
-          <div className="space-y-6 slide-in">
-            {/* Stats row */}
-            <div className="grid grid-cols-4 gap-4">
+        {/* DASHBOARD TAB */}
+        {tab==='dashboard' && (
+          <div>
+            {/* Stats */}
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'16px', marginBottom:'28px' }} className="fade-up">
               {[
-                { label: 'My Tasks', value: myTasks.length, sub: `${myTasks.filter(t=>t.status==='In Progress').length} active` },
-                { label: 'Completed', value: myTasks.filter(t=>t.status==='Done').length, sub: `${completedPct}% done`, color: 'text-green-700' },
-                { label: 'Helping On', value: helperTasks.length, sub: 'as helper', color: 'text-purple-700' },
-                { label: 'Today', value: formatSeconds(totalToday + (timerRunning ? timerSeconds : 0)), sub: timerRunning ? 'clocked in' : 'total time', mono: true },
-              ].map(s => (
-                <div key={s.label} className="bg-white rounded-xl border border-gray-200 p-4">
-                  <p className="text-xs text-gray-500 mb-1">{s.label}</p>
-                  <p className={`text-2xl font-semibold ${s.color || 'text-gray-900'} ${s.mono ? 'font-mono' : ''}`}>{s.value}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">{s.sub}</p>
+                { label:'My Tasks', value:myTasks.length, sub:`${myTasks.filter(t=>t.status==='In Progress').length} active`, color:'var(--accent)' },
+                { label:'Completed', value:myTasks.filter(t=>t.status==='Done').length, sub:`${donePct}% complete`, color:'var(--green)' },
+                { label:'Helping On', value:helperTasks.length, sub:'as a helper', color:'var(--purple)' },
+                { label:"Today's Time", value:formatSeconds(totalToday+(timerOn?timerSec:0)), sub:timerOn?'currently active':'total logged', color:'var(--blue)', mono:true },
+              ].map((s,i) => (
+                <div key={i} className="stat-card fade-up" style={{ animationDelay:`${i*0.06}s` }}>
+                  <p style={{ fontSize:'11px', fontWeight:'500', color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:'12px' }}>{s.label}</p>
+                  <p style={{ fontSize:'28px', fontWeight:'600', color:s.color, letterSpacing:'-0.5px', fontFamily:s.mono?"'DM Mono',monospace":undefined }}>{s.value}</p>
+                  <p style={{ fontSize:'12px', color:'var(--text3)', marginTop:'4px' }}>{s.sub}</p>
                 </div>
               ))}
             </div>
 
-            {/* Helper tasks banner */}
-            {helperTasks.length > 0 && (
-              <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="text-purple-600"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><circle cx="9" cy="7" r="4" stroke="currentColor" strokeWidth="2"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                  <span className="text-sm font-semibold text-purple-800">You are assigned as a helper on these tasks</span>
+            {/* Helper banner */}
+            {helperTasks.length>0 && (
+              <div style={{ background:'var(--purple-bg)', border:'1px solid rgba(167,139,250,0.2)', borderRadius:'16px', padding:'16px 20px', marginBottom:'24px' }} className="fade-up-1">
+                <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'12px' }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ color:'var(--purple)' }}><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><circle cx="9" cy="7" r="4" stroke="currentColor" strokeWidth="2"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                  <span style={{ fontSize:'13px', fontWeight:'600', color:'var(--purple)' }}>You&apos;re a helper on {helperTasks.length} task{helperTasks.length>1?'s':''}</span>
                 </div>
-                <div className="grid gap-2">
+                <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
                   {helperTasks.map(t => (
-                    <div key={t.id} className="bg-white rounded-lg border border-purple-200 p-3 flex items-center gap-3">
+                    <div key={t.id} style={{ background:'var(--bg3)', border:'1px solid rgba(167,139,250,0.15)', borderRadius:'10px', padding:'10px 14px', display:'flex', alignItems:'center', gap:'12px' }}>
                       <div>
-                        <p className="text-sm font-medium text-gray-900">{t.title}</p>
-                        <p className="text-xs text-gray-500">Assigned to: {t.assignee?.name || 'Unknown'} · <StatusBadge status={t.status} /></p>
+                        <p style={{ fontSize:'13px', fontWeight:'500', color:'var(--text)', marginBottom:'2px' }}>{t.title}</p>
+                        <p style={{ fontSize:'11px', color:'var(--text3)' }}>Assigned to {t.assignee?.name}</p>
                       </div>
+                      <span className={`badge ${statusBadgeClass(t.status)}`} style={{ marginLeft:'auto' }}>{t.status}</span>
                     </div>
                   ))}
                 </div>
               </div>
             )}
 
-            {/* My tasks */}
+            {/* Tasks */}
             <div>
-              <h2 className="text-sm font-semibold text-gray-700 mb-3">My Tasks</h2>
-              {myTasks.length === 0 ? (
-                <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
-                  <p className="text-gray-400 text-sm">No tasks assigned yet</p>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'16px' }}>
+                <h2 style={{ fontSize:'14px', fontWeight:'600', color:'var(--text2)', textTransform:'uppercase', letterSpacing:'0.06em' }}>My Tasks</h2>
+                <button className="btn-ghost" onClick={()=>setTab('chat')} style={{ fontSize:'12px', padding:'6px 12px' }}>Update via chat →</button>
+              </div>
+
+              {myTasks.length===0 ? (
+                <div className="card" style={{ padding:'48px', textAlign:'center' }}>
+                  <p style={{ color:'var(--text3)', fontSize:'14px' }}>No tasks assigned yet</p>
                 </div>
               ) : (
-                <div className="space-y-2">
-                  {myTasks.map(t => (
-                    <div key={t.id} onClick={() => setSelectedTask(selectedTask?.id === t.id ? null : t)}
-                      className={`bg-white rounded-xl border cursor-pointer transition-all ${selectedTask?.id === t.id ? 'border-blue-300 shadow-sm' : 'border-gray-200 hover:border-gray-300'} ${t.attention_needed ? 'border-l-4 border-l-amber-400' : ''}`}>
-                      <div className="p-4 flex items-center gap-4">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            {t.attention_needed && (
-                              <span className="flex items-center gap-1 text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full animate-attention">
-                                <span>⚠</span> Needs attention
-                              </span>
-                            )}
-                            <span className="font-medium text-sm text-gray-900">{t.title}</span>
+                <div style={{ display:'flex', flexDirection:'column', gap:'10px' }}>
+                  {myTasks.map((t,i) => (
+                    <div key={t.id} className={`task-card ${expandedTask===t.id?'active':''}`} style={{ animationDelay:`${i*0.04}s` }}
+                      onClick={()=>setExpandedTask(expandedTask===t.id?null:t.id)}>
+                      <div style={{ display:'flex', alignItems:'center', gap:'12px' }}>
+                        {/* Status dot */}
+                        <div style={{ width:'8px', height:'8px', borderRadius:'50%', flexShrink:0, background: t.status==='Done'?'var(--green)':t.status==='In Progress'?'var(--blue)':t.status==='Blocked'?'var(--red)':'var(--text3)' }} />
+
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px', flexWrap:'wrap' }}>
+                            {t.attention_needed && <span style={{ fontSize:'11px', color:'var(--amber)', background:'var(--amber-bg)', border:'1px solid rgba(245,158,11,0.25)', padding:'2px 8px', borderRadius:'20px', fontWeight:'500' }} className="animate-pulse-dot">⚠ Attention needed</span>}
+                            <span style={{ fontSize:'14px', fontWeight:'500', color:'var(--text)' }}>{t.title}</span>
                           </div>
-                          <div className="flex items-center gap-3 text-xs text-gray-500">
-                            <StatusBadge status={t.status} />
-                            <PriorityDot p={t.priority} />
-                            <span>{t.priority}</span>
-                            {t.tag && <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{t.tag}</span>}
-                            {t.due_date && <span>Due {new Date(t.due_date).toLocaleDateString()}</span>}
-                            {t.helper && <span className="text-purple-600">Helper: {t.helper.name}</span>}
+                          <div style={{ display:'flex', alignItems:'center', gap:'8px', flexWrap:'wrap' }}>
+                            <span className={`badge ${statusBadgeClass(t.status)}`}>{t.status}</span>
+                            <span className={`badge badge-${t.priority.toLowerCase()}`}>{t.priority}</span>
+                            {t.tag && <span style={{ fontSize:'11px', color:'var(--text3)', background:'var(--bg4)', border:'1px solid var(--border)', padding:'2px 8px', borderRadius:'20px' }}>{t.tag}</span>}
+                            {t.helper && <span style={{ fontSize:'11px', color:'var(--purple)' }}>Helper: {t.helper.name}</span>}
+                            {t.due_date && <span style={{ fontSize:'11px', color:'var(--text3)' }}>Due {new Date(t.due_date).toLocaleDateString()}</span>}
                           </div>
                         </div>
-                        <div className="flex items-center gap-3 flex-shrink-0">
-                          <div className="text-right">
-                            <p className="text-xs text-gray-500">{t.progress}%</p>
-                            <div className="w-24 h-1.5 bg-gray-100 rounded-full mt-1">
-                              <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${t.progress}%` }} />
-                            </div>
+
+                        <div style={{ flexShrink:0, textAlign:'right', minWidth:'80px' }}>
+                          <span style={{ fontSize:'13px', fontWeight:'600', color:'var(--text2)', fontFamily:"'DM Mono',monospace" }}>{t.progress}%</span>
+                          <div className="progress-track" style={{ marginTop:'6px' }}>
+                            <div className="progress-fill" style={{ width:`${t.progress}%` }} />
                           </div>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className={`text-gray-300 transition-transform ${selectedTask?.id === t.id ? 'rotate-180' : ''}`}><path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
                         </div>
+
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ color:'var(--text3)', transition:'transform 0.2s', transform:expandedTask===t.id?'rotate(180deg)':'none', flexShrink:0 }}>
+                          <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
                       </div>
 
-                      {/* Expanded detail */}
-                      {selectedTask?.id === t.id && (
-                        <div className="border-t border-gray-100 p-4 bg-gray-50 rounded-b-xl">
-                          {t.description && <p className="text-sm text-gray-700 mb-3">{t.description}</p>}
+                      {expandedTask===t.id && (
+                        <div style={{ marginTop:'16px', paddingTop:'16px', borderTop:'1px solid var(--border)' }} onClick={e=>e.stopPropagation()}>
+                          {t.description && <p style={{ fontSize:'13px', color:'var(--text2)', marginBottom:'12px', lineHeight:'1.6' }}>{t.description}</p>}
                           {t.notes && (
-                            <div className="bg-white rounded-lg border border-gray-200 p-3 mb-3">
-                              <p className="text-xs text-gray-500 mb-1">Latest notes</p>
-                              <p className="text-sm text-gray-800">{t.notes}</p>
+                            <div style={{ background:'var(--bg4)', border:'1px solid var(--border)', borderRadius:'10px', padding:'12px', marginBottom:'12px' }}>
+                              <p style={{ fontSize:'11px', color:'var(--text3)', marginBottom:'4px', fontWeight:'500', textTransform:'uppercase', letterSpacing:'0.06em' }}>Latest notes</p>
+                              <p style={{ fontSize:'13px', color:'var(--text)', lineHeight:'1.6' }}>{t.notes}</p>
                             </div>
                           )}
                           {t.attention_reason && (
-                            <div className="bg-amber-50 rounded-lg border border-amber-200 p-3 mb-3">
-                              <p className="text-xs text-amber-600 mb-1">Attention reason</p>
-                              <p className="text-sm text-amber-800">{t.attention_reason}</p>
+                            <div style={{ background:'var(--amber-bg)', border:'1px solid rgba(245,158,11,0.2)', borderRadius:'10px', padding:'12px', marginBottom:'12px' }}>
+                              <p style={{ fontSize:'11px', color:'var(--amber)', marginBottom:'4px', fontWeight:'500', textTransform:'uppercase', letterSpacing:'0.06em' }}>Attention reason</p>
+                              <p style={{ fontSize:'13px', color:'rgba(245,158,11,0.9)' }}>{t.attention_reason}</p>
                             </div>
                           )}
-                          <button onClick={() => { setActiveTab('chat'); setChatInput(`Update on "${t.title}": `) }}
-                            className="text-sm text-blue-600 hover:text-blue-700 font-medium">
+                          <button onClick={() => { setTab('chat'); setChatInput(`Update on "${t.title}": `) }}
+                            style={{ background:'none', border:'none', cursor:'pointer', color:'var(--accent)', fontSize:'13px', fontFamily:"'DM Sans',sans-serif", padding:0 }}>
                             Update this task via chat →
                           </button>
                         </div>
@@ -335,26 +298,40 @@ export default function EmployeeDashboard() {
           </div>
         )}
 
-        {activeTab === 'chat' && (
-          <div className="slide-in max-w-2xl mx-auto">
-            <div className="bg-white rounded-2xl border border-gray-200 flex flex-col" style={{ height: 'calc(100vh - 180px)', minHeight: '500px' }}>
-              <div className="px-5 py-4 border-b border-gray-100">
-                <h2 className="font-semibold text-gray-900 text-sm">Task Update Chat</h2>
-                <p className="text-xs text-gray-500 mt-0.5">Tell me what you worked on — I will update the dashboard automatically</p>
+        {/* CHAT TAB */}
+        {tab==='chat' && (
+          <div className="fade-up" style={{ maxWidth:'680px', margin:'0 auto' }}>
+            <div className="card" style={{ display:'flex', flexDirection:'column', height:'calc(100vh - 160px)', minHeight:'520px' }}>
+              {/* Chat header */}
+              <div style={{ padding:'18px 20px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:'12px' }}>
+                <div style={{ width:'36px', height:'36px', borderRadius:'12px', background:'linear-gradient(135deg,var(--accent),#8b85ff)', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 4px 12px var(--accent-glow)' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </div>
+                <div>
+                  <p style={{ fontSize:'14px', fontWeight:'600', color:'var(--text)' }}>Task Update Assistant</p>
+                  <p style={{ fontSize:'12px', color:'var(--text3)' }}>Describe your progress — I&apos;ll update the dashboard automatically</p>
+                </div>
+                <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:'6px' }}>
+                  <div style={{ width:'6px', height:'6px', borderRadius:'50%', background:'var(--green)' }} className="animate-pulse-dot" />
+                  <span style={{ fontSize:'11px', color:'var(--green)' }}>AI Active</span>
+                </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-5 space-y-4">
-                {chatMessages.length === 0 && (
-                  <div className="text-center py-8">
-                    <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center mx-auto mb-3">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" className="text-blue-600"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              {/* Messages */}
+              <div style={{ flex:1, overflowY:'auto', padding:'20px', display:'flex', flexDirection:'column', gap:'16px' }}>
+                {chatMsgs.length===0 && (
+                  <div style={{ textAlign:'center', padding:'32px 0' }}>
+                    <div style={{ width:'48px', height:'48px', borderRadius:'16px', background:'var(--bg4)', border:'1px solid var(--border2)', display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 16px' }}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style={{ color:'var(--accent)' }}><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
                     </div>
-                    <p className="text-sm font-medium text-gray-700 mb-1">Hi {user.name}!</p>
-                    <p className="text-sm text-gray-500 mb-4">Tell me how your tasks are going. Try:</p>
-                    <div className="space-y-2 text-left max-w-sm mx-auto">
-                      {[`"I finished the login redesign"`, `"I'm 70% done with the API bug, blocked on token refresh"`, `"Completed the test suite setup"`].map(ex => (
-                        <button key={ex} onClick={() => setChatInput(ex.replace(/"/g, ''))}
-                          className="w-full text-left text-sm text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg px-3 py-2 transition-colors">
+                    <p style={{ fontSize:'15px', fontWeight:'600', color:'var(--text)', marginBottom:'6px' }}>Hi {user.name}!</p>
+                    <p style={{ fontSize:'13px', color:'var(--text3)', marginBottom:'20px' }}>Tell me what you worked on. For example:</p>
+                    <div style={{ display:'flex', flexDirection:'column', gap:'8px', maxWidth:'360px', margin:'0 auto' }}>
+                      {[`"Finished the login redesign, everything looks great"`,`"I'm 70% done with the API bug, blocked on token refresh"`,`"Completed the test suite, all tests passing"`].map(ex => (
+                        <button key={ex} onClick={()=>setChatInput(ex.replace(/"/g,''))}
+                          style={{ background:'var(--bg4)', border:'1px solid var(--border)', borderRadius:'10px', padding:'10px 14px', fontSize:'13px', color:'var(--text2)', cursor:'pointer', textAlign:'left', transition:'all 0.15s', fontFamily:"'DM Sans',sans-serif" }}
+                          onMouseEnter={e=>{(e.target as HTMLButtonElement).style.borderColor='var(--accent)';(e.target as HTMLButtonElement).style.color='var(--text)'}}
+                          onMouseLeave={e=>{(e.target as HTMLButtonElement).style.borderColor='var(--border)';(e.target as HTMLButtonElement).style.color='var(--text2)'}}>
                           {ex}
                         </button>
                       ))}
@@ -362,22 +339,22 @@ export default function EmployeeDashboard() {
                   </div>
                 )}
 
-                {chatMessages.map((msg, i) => (
-                  <div key={i} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium flex-shrink-0 mt-0.5 ${msg.role === 'user' ? 'text-white' : 'bg-blue-100 text-blue-700'}`}
-                      style={msg.role === 'user' ? { background: user.avatar_color } : {}}>
-                      {msg.role === 'user' ? user.avatar_initials : 'AI'}
-                    </div>
-                    <div className={`max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-gray-100 text-gray-800 rounded-tl-sm'}`}>
+                {chatMsgs.map((msg,i) => (
+                  <div key={i} style={{ display:'flex', gap:'10px', flexDirection:msg.role==='user'?'row-reverse':'row', alignItems:'flex-end' }}>
+                    {msg.role==='user'
+                      ? <Avatar initials={user.avatar_initials} color={user.avatar_color} size={28} />
+                      : <div style={{ width:'28px', height:'28px', borderRadius:'10px', background:'linear-gradient(135deg,var(--accent),#8b85ff)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, fontSize:'11px', fontWeight:'700', color:'white' }}>AI</div>
+                    }
+                    <div className={msg.role==='user'?'msg-user':'msg-ai'}>
                       {msg.content}
-                      {msg.updates && msg.updates.length > 0 && (
-                        <div className="mt-2 pt-2 border-t border-gray-200 space-y-1.5">
-                          <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Dashboard updated</p>
-                          {msg.updates.map((u, j) => (
-                            <div key={j} className="bg-white rounded-lg p-2 text-xs">
-                              <p className="font-medium text-gray-800 mb-1">{u.taskTitle}</p>
-                              {u.statusChange && <p className="text-gray-500">Status: <span className="text-gray-800">{u.statusChange.from} → {u.statusChange.to}</span></p>}
-                              {u.progressChange && <p className="text-gray-500">Progress: <span className="text-gray-800">{u.progressChange.from}% → {u.progressChange.to}%</span></p>}
+                      {msg.updates && msg.updates.length>0 && (
+                        <div className="update-card">
+                          <p style={{ fontSize:'10px', color:'var(--text3)', fontWeight:'500', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:'8px' }}>Dashboard updated</p>
+                          {msg.updates.map((u,j) => (
+                            <div key={j} style={{ paddingBottom:'6px', marginBottom:'6px', borderBottom:'1px solid var(--border)' }}>
+                              <p style={{ fontSize:'12px', fontWeight:'600', color:'var(--text)', marginBottom:'4px' }}>{u.taskTitle}</p>
+                              {u.statusChange && <p style={{ fontSize:'11px', color:'var(--text3)' }}>Status: <span style={{ color:'var(--text2)' }}>{u.statusChange.from} → {u.statusChange.to}</span></p>}
+                              {u.progressChange && <p style={{ fontSize:'11px', color:'var(--text3)' }}>Progress: <span style={{ color:'var(--text2)' }}>{u.progressChange.from}% → {u.progressChange.to}%</span></p>}
                             </div>
                           ))}
                         </div>
@@ -387,30 +364,26 @@ export default function EmployeeDashboard() {
                 ))}
 
                 {chatLoading && (
-                  <div className="flex gap-3">
-                    <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center text-xs font-medium text-blue-700">AI</div>
-                    <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-3">
-                      <div className="flex gap-1">
-                        {[0,1,2].map(i => <div key={i} className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: `${i*0.15}s` }} />)}
+                  <div style={{ display:'flex', gap:'10px', alignItems:'flex-end' }}>
+                    <div style={{ width:'28px', height:'28px', borderRadius:'10px', background:'linear-gradient(135deg,var(--accent),#8b85ff)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, fontSize:'11px', fontWeight:'700', color:'white' }}>AI</div>
+                    <div className="msg-ai" style={{ padding:'14px 16px' }}>
+                      <div style={{ display:'flex', gap:'5px', alignItems:'center' }}>
+                        {[0,1,2].map(i => <div key={i} style={{ width:'6px', height:'6px', borderRadius:'50%', background:'var(--text3)' }} className="animate-bounce-dot" />)}
                       </div>
                     </div>
                   </div>
                 )}
-                <div ref={messagesEndRef} />
+                <div ref={msgsEndRef} />
               </div>
 
-              <div className="p-4 border-t border-gray-100 flex gap-2">
-                <textarea
-                  value={chatInput}
-                  onChange={e => setChatInput(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat() } }}
-                  placeholder="What did you work on? Any blockers?"
-                  rows={2}
-                  className="flex-1 resize-none rounded-xl border border-gray-200 px-3.5 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-                <button onClick={sendChat} disabled={!chatInput.trim() || chatLoading}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-sm font-medium transition-colors self-end">
-                  Send
+              {/* Input */}
+              <div style={{ padding:'16px 20px', borderTop:'1px solid var(--border)', display:'flex', gap:'10px', alignItems:'flex-end' }}>
+                <textarea value={chatInput} onChange={e=>setChatInput(e.target.value)}
+                  onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChat()}}}
+                  placeholder="What did you work on today? Any blockers?" rows={2}
+                  className="input-field" style={{ flex:1, resize:'none', maxHeight:'120px', overflowY:'auto' }} />
+                <button onClick={sendChat} disabled={!chatInput.trim()||chatLoading} className="btn-primary" style={{ flexShrink:0, padding:'11px 20px', alignSelf:'flex-end' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><line x1="22" y1="2" x2="11" y2="13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><polygon points="22,2 15,22 11,13 2,9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
                 </button>
               </div>
             </div>

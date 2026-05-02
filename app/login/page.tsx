@@ -12,95 +12,74 @@ export default function LoginPage() {
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
-    setLoading(true)
-    setError('')
-
+    setLoading(true); setError('')
     try {
       const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       })
       const data = await res.json()
-      if (!res.ok) {
-        setError(data.error || 'Login failed')
-        return
-      }
+      if (!res.ok) { setError(data.error || 'Login failed'); return }
       router.push(data.user.role === 'manager' ? '/manager' : '/employee')
-    } catch {
-      setError('Connection error. Please try again.')
-    } finally {
-      setLoading(false)
-    }
+    } catch { setError('Connection error. Please try again.') }
+    finally { setLoading(false) }
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
+    <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex', alignItems:'center', justifyContent:'center', padding:'20px', fontFamily:"'DM Sans', sans-serif" }}>
+
+      {/* Background glow */}
+      <div style={{ position:'fixed', top:'20%', left:'50%', transform:'translateX(-50%)', width:'600px', height:'600px', background:'radial-gradient(circle, rgba(108,99,255,0.08) 0%, transparent 70%)', pointerEvents:'none' }} />
+
+      <div style={{ width:'100%', maxWidth:'400px' }} className="fade-up">
+
         {/* Logo */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-blue-600 mb-4">
+        <div style={{ textAlign:'center', marginBottom:'40px' }}>
+          <div style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:'52px', height:'52px', borderRadius:'16px', background:'linear-gradient(135deg, var(--accent), #8b85ff)', marginBottom:'16px', boxShadow:'0 8px 32px var(--accent-glow)' }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-              <path d="M9 11l3 3L22 4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M9 11l3 3L22 4" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </div>
-          <h1 className="text-2xl font-semibold text-gray-900">TaskFlow</h1>
-          <p className="text-sm text-gray-500 mt-1">Team task management & tracking</p>
+          <h1 style={{ fontSize:'26px', fontWeight:'600', color:'var(--text)', letterSpacing:'-0.5px' }}>TaskFlow</h1>
+          <p style={{ fontSize:'14px', color:'var(--text3)', marginTop:'6px' }}>Team task management</p>
         </div>
 
         {/* Card */}
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-8">
-          <h2 className="text-lg font-semibold text-gray-900 mb-1">Sign in</h2>
-          <p className="text-sm text-gray-500 mb-6">Enter your credentials to access your dashboard</p>
+        <div style={{ background:'var(--bg3)', border:'1px solid var(--border2)', borderRadius:'20px', padding:'32px', boxShadow:'0 32px 80px rgba(0,0,0,0.4)' }}>
+          <h2 style={{ fontSize:'18px', fontWeight:'600', color:'var(--text)', marginBottom:'6px' }}>Welcome back</h2>
+          <p style={{ fontSize:'13px', color:'var(--text3)', marginBottom:'28px' }}>Sign in to your workspace</p>
 
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Email address</label>
-              <input
-                type="email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                placeholder="you@company.com"
-                required
-                className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
-              />
+          <form onSubmit={handleLogin}>
+            <div style={{ marginBottom:'16px' }}>
+              <label className="label">Email address</label>
+              <input className="input-field" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@company.com" required />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Password</label>
-              <input
-                type="password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder="••••••••"
-                required
-                className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
-              />
+            <div style={{ marginBottom:'24px' }}>
+              <label className="label">Password</label>
+              <input className="input-field" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required />
             </div>
 
             {error && (
-              <div className="flex items-center gap-2 p-3 rounded-lg bg-red-50 border border-red-200">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="text-red-500 flex-shrink-0">
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/>
-                  <line x1="12" y1="8" x2="12" y2="12" stroke="currentColor" strokeWidth="2"/>
-                  <line x1="12" y1="16" x2="12.01" y2="16" stroke="currentColor" strokeWidth="2"/>
-                </svg>
-                <span className="text-sm text-red-700">{error}</span>
+              <div style={{ display:'flex', alignItems:'center', gap:'8px', background:'var(--red-bg)', border:'1px solid rgba(244,63,94,0.25)', borderRadius:'10px', padding:'10px 14px', marginBottom:'16px' }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ color:'var(--red)', flexShrink:0 }}><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/><line x1="12" y1="8" x2="12" y2="12" stroke="currentColor" strokeWidth="2"/><circle cx="12" cy="16" r="1" fill="currentColor"/></svg>
+                <span style={{ fontSize:'13px', color:'var(--red)' }}>{error}</span>
               </div>
             )}
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-medium py-2.5 px-4 rounded-lg text-sm transition-colors"
-            >
-              {loading ? 'Signing in...' : 'Sign in'}
+            <button className="btn-primary" type="submit" disabled={loading} style={{ width:'100%', padding:'12px', fontSize:'15px' }}>
+              {loading ? (
+                <span style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:'8px' }}>
+                  <span style={{ width:'14px', height:'14px', border:'2px solid rgba(255,255,255,0.3)', borderTopColor:'white', borderRadius:'50%', display:'inline-block' }} className="animate-spin-slow" />
+                  Signing in...
+                </span>
+              ) : 'Sign in'}
             </button>
           </form>
         </div>
 
-        <p className="text-center text-xs text-gray-400 mt-6">
-          Access is managed by your team manager
+        <p style={{ textAlign:'center', fontSize:'12px', color:'var(--text3)', marginTop:'24px' }}>
+          Access managed by your team administrator
         </p>
       </div>
     </div>
