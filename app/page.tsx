@@ -6,5 +6,6 @@ export default async function Home() {
   if (session) {
     redirect(session.role === 'manager' ? '/manager' : '/employee')
   }
+  // Home always goes to employee login
   redirect('/login')
 }
