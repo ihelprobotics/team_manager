@@ -7,10 +7,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const { id } = await params
   const db = getSupabaseAdmin()
-  const body = await req.json()
 
-  const { data: current } = await db.from('tasks').select('*').eq('id', id).single()
-  if (!current) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  let body
+  try { body = await req.json() } catch (e) {
+    return NextResponse.json({ error: 'Invalid body' }, { status: 400 })
+  }
+
+  const { data: current, error: fetchErr } = await db.from('tasks').select('*').eq('id', id).single()
+  if (fetchErr || !current) return NextResponse.json({ error: 'Task not found' }, { status: 404 })
 
   if (session.role === 'employee' && current.assignee_id !== session.id && current.helper_id !== session.id) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -23,10 +27,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   const { data, error } = await db.from('tasks').update(updatePayload).eq('id', id)
-    .select(`*, assignee:assignee_id(id,name,avatar_initials,avatar_color), helper:helper_id(id,name,avatar_initials,avatar_color)`).single()
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    .select(`*, assignee:assignee_id(id,name,avatar_initials,avatar_color), helper:helper_id(id,name,avatar_initials,avatar_color)`)
+    .single()
 
-  // Log changes
+  if (error) {
+    console.error('Task PATCH error:', error)
+    return NextResponse.json({ error: error.message, code: error.code }, { status: 500 })
+  }
+
   if (body.status && body.status !== current.status)
     await db.from('task_activity').insert({ task_id: id, user_id: session.id, action: 'status_changed', old_value: current.status, new_value: body.status })
   if (body.progress !== undefined && body.progress !== current.progress)
@@ -45,6 +53,9 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const { id } = await params
   const db = getSupabaseAdmin()
   const { error } = await db.from('tasks').delete().eq('id', id)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) {
+    console.error('Task DELETE error:', error)
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
   return NextResponse.json({ ok: true })
 }
