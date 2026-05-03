@@ -368,7 +368,8 @@ export default function ManagerDashboard() {
                         ))}
                       </div>
                       <div style={{ display:'flex', gap:'8px' }}>
-                        <button className="btn-primary" style={{ fontSize:'12px', padding:'7px 14px' }} onClick={()=>{ setTaskForm(f=>({...f,assignee_id:emp.id})); setShowAddTask(true) }}>+ Assign Task</button>
+                        <button onClick={()=>router.push('/manager/employee?id='+emp.id)} style={{ fontSize:'12px', padding:'7px 14px', background:'var(--accent)', color:'white', border:'none', borderRadius:'9px', cursor:'pointer', fontFamily:"'DM Sans',sans-serif", fontWeight:'500' }}>Analytics →</button>
+                      <button className="btn-primary" style={{ fontSize:'12px', padding:'7px 14px' }} onClick={()=>{ setTaskForm(f=>({...f,assignee_id:emp.id})); setShowAddTask(true) }}>+ Assign Task</button>
                         <button className="btn-ghost" style={{ fontSize:'12px', padding:'7px 14px', color:'var(--red)', borderColor:'rgba(244,63,94,0.3)' }} onClick={()=>removeEmployee(emp.id,emp.name)}>Remove</button>
                       </div>
                     </div>

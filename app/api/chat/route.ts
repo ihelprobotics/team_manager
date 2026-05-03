@@ -2,119 +2,50 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase'
 import { getSession } from '@/lib/auth'
 
-// ─── AI Provider cascade ────────────────────────────────────────────
-// Tries each provider in order until one works.
-// All are free forever with no credit card required.
-// ────────────────────────────────────────────────────────────────────
-
 async function callAI(prompt: string): Promise<string> {
-  const errors: string[] = []
-
-  // ── 1. Groq (FREE — Llama 3.1 8B, 14,400 req/day free, no card) ──
+  // 1. Groq
   if (process.env.GROQ_API_KEY) {
     try {
       const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-        },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` },
         body: JSON.stringify({
           model: 'llama-3.1-8b-instant',
           messages: [{ role: 'user', content: prompt }],
-          max_tokens: 1000,
-          temperature: 0.7,
+          max_tokens: 1200, temperature: 0.3,
         }),
       })
-      const data = await res.json()
-      if (data.choices?.[0]?.message?.content) {
-        return data.choices[0].message.content
-      }
-      errors.push(`Groq: ${data.error?.message || 'No response'}`)
-    } catch (e) {
-      errors.push(`Groq exception: ${e}`)
-    }
+      const d = await res.json()
+      if (d.choices?.[0]?.message?.content) return d.choices[0].message.content
+    } catch (e) { console.error('Groq failed:', e) }
   }
-
-  // ── 2. Gemini 1.5 Flash 8B (FREE tier fallback — 1000 req/day) ──
+  // 2. Gemini
   if (process.env.GEMINI_API_KEY) {
-    try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-8b:generateContent?key=${process.env.GEMINI_API_KEY}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            generationConfig: { maxOutputTokens: 1000 },
-          }),
-        }
-      )
-      const data = await res.json()
-      if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-        return data.candidates[0].content.parts[0].text
-      }
-      errors.push(`Gemini 1.5-flash-8b: ${data.error?.message || 'No response'}`)
-    } catch (e) {
-      errors.push(`Gemini exception: ${e}`)
+    for (const model of ['gemini-1.5-flash-8b', 'gemini-2.0-flash']) {
+      try {
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 1200, temperature: 0.3 } }) }
+        )
+        const d = await res.json()
+        if (d.candidates?.[0]?.content?.parts?.[0]?.text) return d.candidates[0].content.parts[0].text
+      } catch (e) { console.error(`Gemini ${model} failed:`, e) }
     }
   }
-
-  // ── 3. Gemini 2.0 Flash (second Gemini fallback) ──
-  if (process.env.GEMINI_API_KEY) {
-    try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            generationConfig: { maxOutputTokens: 1000 },
-          }),
-        }
-      )
-      const data = await res.json()
-      if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-        return data.candidates[0].content.parts[0].text
-      }
-      errors.push(`Gemini 2.0-flash: ${data.error?.message || 'No response'}`)
-    } catch (e) {
-      errors.push(`Gemini 2.0 exception: ${e}`)
-    }
-  }
-
-  // ── 4. OpenRouter free tier (FREE — many models, no card needed) ──
+  // 3. OpenRouter
   if (process.env.OPENROUTER_API_KEY) {
     try {
       const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          'HTTP-Referer': 'https://ihelprobotics.online',
-        },
-        body: JSON.stringify({
-          model: 'meta-llama/llama-3.1-8b-instruct:free',
-          messages: [{ role: 'user', content: prompt }],
-          max_tokens: 1000,
-        }),
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`, 'HTTP-Referer': 'https://ihelprobotics.online' },
+        body: JSON.stringify({ model: 'meta-llama/llama-3.1-8b-instruct:free', messages: [{ role: 'user', content: prompt }], max_tokens: 1200 }),
       })
-      const data = await res.json()
-      if (data.choices?.[0]?.message?.content) {
-        return data.choices[0].message.content
-      }
-      errors.push(`OpenRouter: ${data.error?.message || 'No response'}`)
-    } catch (e) {
-      errors.push(`OpenRouter exception: ${e}`)
-    }
+      const d = await res.json()
+      if (d.choices?.[0]?.message?.content) return d.choices[0].message.content
+    } catch (e) { console.error('OpenRouter failed:', e) }
   }
-
-  console.error('All AI providers failed:', errors)
-  throw new Error(`All AI providers failed: ${errors.join(' | ')}`)
+  throw new Error('All AI providers failed')
 }
-
-// ─── Main route ──────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
   const session = await getSession()
@@ -124,97 +55,125 @@ export async function POST(req: NextRequest) {
 
   const { data: tasks } = await db
     .from('tasks')
-    .select('id,title,status,progress,notes,priority,tag,due_date,attention_needed')
+    .select('id,title,status,progress,notes,priority,tag')
     .or(`assignee_id.eq.${session.id},helper_id.eq.${session.id}`)
 
   type TaskRow = { id: string; title: string; status: string; progress: number; priority: string; notes?: string }
   const taskList = ((tasks || []) as TaskRow[]).map(t =>
-    `- [ID:${t.id}] "${t.title}" | Status: ${t.status} | Progress: ${t.progress}% | Priority: ${t.priority}${t.notes ? ` | Notes: ${t.notes}` : ''}`
+    `ID:${t.id} | "${t.title}" | Status:${t.status} | Progress:${t.progress}% | Priority:${t.priority}${t.notes ? ` | Notes:${t.notes}` : ''}`
   ).join('\n')
 
   type MsgRow = { role: string; content: string }
-  const conversationText = ((history || []) as MsgRow[])
-    .map(m => `${m.role === 'user' ? 'Employee' : 'Assistant'}: ${m.content}`)
-    .join('\n')
+  const history10 = ((history || []) as MsgRow[]).slice(-10)
+    .map(m => `${m.role === 'user' ? 'EMPLOYEE' : 'ASSISTANT'}: ${m.content}`).join('\n')
 
-  const prompt = `You are a friendly task update assistant for ${session.name} at TaskFlow.
+  // CRITICAL: Force JSON output always
+  const prompt = `You are a task tracking assistant. Employee: ${session.name}.
 
-Their current tasks:
-${taskList || '(No tasks assigned yet)'}
+EMPLOYEE TASKS (use exact IDs when updating):
+${taskList || 'No tasks assigned yet.'}
 
-When the employee tells you about their work:
-1. Understand which task(s) they are updating
-2. Extract new status, progress %, and any notes  
-3. Reply warmly in 2-3 sentences confirming what you understood
-4. If they mention being stuck, blocked, or needing help — set attention_needed to true
+${history10 ? `RECENT CONVERSATION:\n${history10}\n` : ''}
+EMPLOYEE SAYS: "${message}"
 
-${conversationText ? `Conversation so far:\n${conversationText}\n` : ''}Employee: ${message}
+YOUR JOB:
+1. Write a warm 1-2 sentence reply acknowledging what they said.
+2. Figure out which tasks are being updated based on what they said.
+3. ALWAYS output a JSON block at the end — even if no updates, output empty updates array.
 
-End your reply with a JSON block between <<<JSON>>> markers ONLY if there are real task updates:
-<<<JSON>>>
+RULES FOR JSON:
+- Match task by name similarity if ID not mentioned
+- If employee says "done" / "finished" / "completed" → newStatus = "Done", newProgress = 100
+- If employee says "working on" / "started" / "in progress" → newStatus = "In Progress"  
+- If employee says "blocked" / "stuck" / "can't" / "issue" → newStatus = "Blocked", attention_needed = true
+- If employee mentions a % number → use that as newProgress
+- Only include tasks that were actually mentioned
+
+RESPOND IN THIS EXACT FORMAT (reply first, then JSON):
+
+<reply>Your friendly 1-2 sentence acknowledgment here.</reply>
+
+<taskupdates>
 {
   "updates": [
     {
-      "taskId": "<uuid>",
-      "taskTitle": "<title>",
-      "newStatus": "<To Do|In Progress|Done|Blocked>",
-      "newProgress": <0-100>,
-      "notes": "<brief note>",
-      "attention_needed": <true|false>,
-      "attention_reason": "<reason if flagged, else empty string>",
-      "statusChange": { "from": "<old status>", "to": "<new status>" },
-      "progressChange": { "from": <old number>, "to": <new number> }
+      "taskId": "exact-uuid-from-list-above",
+      "taskTitle": "exact task title",
+      "newStatus": "In Progress",
+      "newProgress": 60,
+      "notes": "brief note from what employee said",
+      "attention_needed": false,
+      "attention_reason": "",
+      "statusChange": { "from": "To Do", "to": "In Progress" },
+      "progressChange": { "from": 0, "to": 60 }
     }
   ]
 }
-<<<JSON>>>
-
-Skip the JSON block entirely for general chat with no task updates.`
+</taskupdates>`
 
   let fullText: string
   try {
     fullText = await callAI(prompt)
+    console.log('AI raw response:', fullText.slice(0, 500))
   } catch (err) {
-    console.error('AI call failed:', err)
-    return NextResponse.json({
-      reply: 'The AI assistant is temporarily unavailable. Your task updates have NOT been saved — please try again in a moment.',
-      updates: null,
-    })
+    console.error('AI failed:', err)
+    return NextResponse.json({ reply: 'AI temporarily unavailable. Please try again.', updates: null })
   }
 
-  let displayText = fullText
-  let updates = null
+  // Parse reply
+  const replyMatch = fullText.match(/<reply>([\s\S]*?)<\/reply>/)
+  let displayText = replyMatch ? replyMatch[1].trim() : fullText.replace(/<taskupdates>[\s\S]*?<\/taskupdates>/g, '').trim()
 
-  const jsonMatch = fullText.match(/<<<JSON>>>([\s\S]*?)<<<JSON>>>/)
-  if (jsonMatch) {
-    displayText = fullText.replace(/<<<JSON>>>[\s\S]*?<<<JSON>>>/, '').trim()
+  // Parse updates — try XML tags first, then fallback to JSON in text
+  let updates: TaskRow[] | null = null
+  const xmlMatch = fullText.match(/<taskupdates>([\s\S]*?)<\/taskupdates>/)
+  const jsonStr = xmlMatch ? xmlMatch[1].trim() : null
+
+  if (jsonStr) {
     try {
-      const parsed = JSON.parse(jsonMatch[1].trim())
+      const parsed = JSON.parse(jsonStr)
       updates = parsed.updates || []
-      for (const u of updates) {
-        const patch: Record<string, unknown> = {
-          status: u.newStatus,
-          progress: u.newProgress,
-          notes: u.notes,
-          updated_at: new Date().toISOString(),
-        }
-        if (u.attention_needed) {
-          patch.attention_needed = true
-          patch.attention_reason = u.attention_reason
-        }
-        await db.from('tasks').update(patch).eq('id', u.taskId)
-        if (u.statusChange)
-          await db.from('task_activity').insert({ task_id: u.taskId, user_id: session.id, action: 'status_changed', old_value: u.statusChange.from, new_value: u.statusChange.to })
-        if (u.progressChange)
-          await db.from('task_activity').insert({ task_id: u.taskId, user_id: session.id, action: 'progress_updated', old_value: String(u.progressChange.from), new_value: String(u.progressChange.to) })
-        if (u.attention_needed)
-          await db.from('task_activity').insert({ task_id: u.taskId, user_id: session.id, action: 'attention_flagged', new_value: u.attention_reason })
+    } catch {
+      // Try to extract just the JSON object
+      const objMatch = jsonStr.match(/\{[\s\S]*\}/)
+      if (objMatch) {
+        try { updates = JSON.parse(objMatch[0]).updates || [] } catch { /* skip */ }
       }
-    } catch (e) {
-      console.error('JSON parse error:', e)
     }
   }
 
+  // Apply updates to database
+  if (updates && updates.length > 0) {
+    type UpdateRow = { taskId: string; newStatus: string; newProgress: number; notes: string; attention_needed: boolean; attention_reason: string; statusChange?: { from: string; to: string }; progressChange?: { from: number; to: number } }
+    for (const u of (updates as unknown) as UpdateRow[]) {
+      if (!u.taskId) continue
+      const patch: Record<string, unknown> = {
+        status: u.newStatus,
+        progress: u.newProgress,
+        updated_at: new Date().toISOString(),
+      }
+      if (u.notes) patch.notes = u.notes
+      if (u.attention_needed) {
+        patch.attention_needed = true
+        patch.attention_reason = u.attention_reason
+      }
+
+      const { error: upErr } = await db.from('tasks').update(patch).eq('id', u.taskId)
+      if (upErr) console.error('Task update error:', upErr)
+
+      // Log activity
+      const acts = []
+      if (u.statusChange?.from !== u.statusChange?.to && u.statusChange)
+        acts.push({ task_id: u.taskId, user_id: session.id, action: 'status_changed', old_value: u.statusChange.from, new_value: u.statusChange.to })
+      if (u.progressChange?.from !== u.progressChange?.to && u.progressChange)
+        acts.push({ task_id: u.taskId, user_id: session.id, action: 'progress_updated', old_value: String(u.progressChange.from), new_value: String(u.progressChange.to) })
+      if (u.attention_needed)
+        acts.push({ task_id: u.taskId, user_id: session.id, action: 'attention_flagged', new_value: u.attention_reason })
+      if (acts.length) await db.from('task_activity').insert(acts)
+    }
+  }
+
+  // Save messages
   await db.from('chat_messages').insert([
     { user_id: session.id, role: 'user', content: message },
     { user_id: session.id, role: 'assistant', content: displayText, task_updates: updates },
@@ -227,11 +186,7 @@ export async function GET() {
   const session = await getSession()
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const db = getSupabaseAdmin()
-  const { data } = await db
-    .from('chat_messages')
-    .select('*')
-    .eq('user_id', session.id)
-    .order('created_at', { ascending: true })
-    .limit(50)
+  const { data } = await db.from('chat_messages').select('*').eq('user_id', session.id)
+    .order('created_at', { ascending: true }).limit(100)
   return NextResponse.json({ messages: data || [] })
 }
