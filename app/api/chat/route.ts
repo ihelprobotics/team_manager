@@ -2,6 +2,120 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase'
 import { getSession } from '@/lib/auth'
 
+// ─── AI Provider cascade ────────────────────────────────────────────
+// Tries each provider in order until one works.
+// All are free forever with no credit card required.
+// ────────────────────────────────────────────────────────────────────
+
+async function callAI(prompt: string): Promise<string> {
+  const errors: string[] = []
+
+  // ── 1. Groq (FREE — Llama 3.1 8B, 14,400 req/day free, no card) ──
+  if (process.env.GROQ_API_KEY) {
+    try {
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: 'llama-3.1-8b-instant',
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 1000,
+          temperature: 0.7,
+        }),
+      })
+      const data = await res.json()
+      if (data.choices?.[0]?.message?.content) {
+        return data.choices[0].message.content
+      }
+      errors.push(`Groq: ${data.error?.message || 'No response'}`)
+    } catch (e) {
+      errors.push(`Groq exception: ${e}`)
+    }
+  }
+
+  // ── 2. Gemini 1.5 Flash 8B (FREE tier fallback — 1000 req/day) ──
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-8b:generateContent?key=${process.env.GEMINI_API_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: { maxOutputTokens: 1000 },
+          }),
+        }
+      )
+      const data = await res.json()
+      if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
+        return data.candidates[0].content.parts[0].text
+      }
+      errors.push(`Gemini 1.5-flash-8b: ${data.error?.message || 'No response'}`)
+    } catch (e) {
+      errors.push(`Gemini exception: ${e}`)
+    }
+  }
+
+  // ── 3. Gemini 2.0 Flash (second Gemini fallback) ──
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: { maxOutputTokens: 1000 },
+          }),
+        }
+      )
+      const data = await res.json()
+      if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
+        return data.candidates[0].content.parts[0].text
+      }
+      errors.push(`Gemini 2.0-flash: ${data.error?.message || 'No response'}`)
+    } catch (e) {
+      errors.push(`Gemini 2.0 exception: ${e}`)
+    }
+  }
+
+  // ── 4. OpenRouter free tier (FREE — many models, no card needed) ──
+  if (process.env.OPENROUTER_API_KEY) {
+    try {
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          'HTTP-Referer': 'https://ihelprobotics.online',
+        },
+        body: JSON.stringify({
+          model: 'meta-llama/llama-3.1-8b-instruct:free',
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 1000,
+        }),
+      })
+      const data = await res.json()
+      if (data.choices?.[0]?.message?.content) {
+        return data.choices[0].message.content
+      }
+      errors.push(`OpenRouter: ${data.error?.message || 'No response'}`)
+    } catch (e) {
+      errors.push(`OpenRouter exception: ${e}`)
+    }
+  }
+
+  console.error('All AI providers failed:', errors)
+  throw new Error(`All AI providers failed: ${errors.join(' | ')}`)
+}
+
+// ─── Main route ──────────────────────────────────────────────────────
+
 export async function POST(req: NextRequest) {
   const session = await getSession()
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -18,18 +132,25 @@ export async function POST(req: NextRequest) {
     `- [ID:${t.id}] "${t.title}" | Status: ${t.status} | Progress: ${t.progress}% | Priority: ${t.priority}${t.notes ? ` | Notes: ${t.notes}` : ''}`
   ).join('\n')
 
-  const systemPrompt = `You are a friendly task update assistant for ${session.name} at TaskFlow.
+  type MsgRow = { role: string; content: string }
+  const conversationText = ((history || []) as MsgRow[])
+    .map(m => `${m.role === 'user' ? 'Employee' : 'Assistant'}: ${m.content}`)
+    .join('\n')
+
+  const prompt = `You are a friendly task update assistant for ${session.name} at TaskFlow.
 
 Their current tasks:
 ${taskList || '(No tasks assigned yet)'}
 
 When the employee tells you about their work:
 1. Understand which task(s) they are updating
-2. Extract new status, progress %, and any notes
+2. Extract new status, progress %, and any notes  
 3. Reply warmly in 2-3 sentences confirming what you understood
 4. If they mention being stuck, blocked, or needing help — set attention_needed to true
 
-End your reply with a JSON block between <<<JSON>>> markers:
+${conversationText ? `Conversation so far:\n${conversationText}\n` : ''}Employee: ${message}
+
+End your reply with a JSON block between <<<JSON>>> markers ONLY if there are real task updates:
 <<<JSON>>>
 {
   "updates": [
@@ -48,48 +169,17 @@ End your reply with a JSON block between <<<JSON>>> markers:
 }
 <<<JSON>>>
 
-Only include the JSON block if there are real task updates. Skip it for general chat.`
+Skip the JSON block entirely for general chat with no task updates.`
 
-  type MsgRow = { role: string; content: string }
-
-  // Build Gemini conversation — inject system prompt into first user message
-  const conversationText = ((history || []) as MsgRow[])
-    .map(m => `${m.role === 'user' ? 'Employee' : 'Assistant'}: ${m.content}`)
-    .join('\n')
-
-  const fullUserMessage = conversationText
-    ? `${systemPrompt}\n\nConversation so far:\n${conversationText}\n\nEmployee: ${message}`
-    : `${systemPrompt}\n\nEmployee: ${message}`
-
-  const geminiBody = {
-    contents: [{ role: 'user', parts: [{ text: fullUserMessage }] }],
-    generationConfig: { maxOutputTokens: 1000, temperature: 0.7 },
-  }
-
-  let fullText = 'Sorry, I could not process that.'
-
+  let fullText: string
   try {
-    const apiResp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(geminiBody),
-      }
-    )
-
-    const aiData = await apiResp.json()
-
-    // Log for debugging (visible in Vercel function logs)
-    if (aiData.error) {
-      console.error('Gemini API error:', JSON.stringify(aiData.error))
-      return NextResponse.json({ reply: `AI error: ${aiData.error?.message || 'Unknown error'}`, updates: null })
-    }
-
-    fullText = aiData.candidates?.[0]?.content?.parts?.[0]?.text || 'Sorry, I could not process that.'
+    fullText = await callAI(prompt)
   } catch (err) {
-    console.error('Gemini fetch error:', err)
-    return NextResponse.json({ reply: 'Could not reach AI service. Please try again.', updates: null })
+    console.error('AI call failed:', err)
+    return NextResponse.json({
+      reply: 'The AI assistant is temporarily unavailable. Your task updates have NOT been saved — please try again in a moment.',
+      updates: null,
+    })
   }
 
   let displayText = fullText
