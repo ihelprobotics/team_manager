@@ -11,7 +11,7 @@ interface Task {
   priority: string; progress: number; notes?: string; tag?: string
   due_date?: string; attention_needed: boolean; attention_reason?: string
   assignee_id?: string; helper_id?: string; assignee?: User; helper?: User
-  updated_at: string
+  updated_at: string; is_self_created?: boolean; approval_status?: string
 }
 interface Activity { id: string; action: string; old_value?: string; new_value?: string; created_at: string; user?: User; task?: { title: string } }
 interface WorkInfo { active: { started_at: string } | null; totalSeconds: number }
@@ -259,6 +259,30 @@ export default function ManagerDashboard() {
                 })}
               </div>
             </div>
+
+
+            {/* Pending task approvals */}
+            {tasks.filter(t=>t.is_self_created && t.approval_status==='pending').length > 0 && (
+              <div style={{ background:'var(--amber-bg)', border:'1px solid rgba(245,158,11,0.25)', borderRadius:'16px', padding:'20px', marginBottom:'20px' }}>
+                <h2 style={{ fontSize:'11px', fontWeight:'600', color:'var(--amber)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:'14px' }}>
+                  ⏳ Pending Task Approvals ({tasks.filter(t=>t.is_self_created && t.approval_status==='pending').length})
+                </h2>
+                {tasks.filter(t=>t.is_self_created && t.approval_status==='pending').map(t => (
+                  <div key={t.id} style={{ background:'var(--bg3)', border:'1px solid rgba(245,158,11,0.2)', borderRadius:'12px', padding:'14px 16px', marginBottom:'8px', display:'flex', alignItems:'center', gap:'14px' }}>
+                    <div style={{ flex:1 }}>
+                      <p style={{ fontSize:'13px', fontWeight:'600', color:'var(--text)', marginBottom:'4px' }}>{t.title}</p>
+                      <p style={{ fontSize:'12px', color:'var(--text3)' }}>Requested by {t.assignee?.name} · {t.priority} priority</p>
+                    </div>
+                    <div style={{ display:'flex', gap:'8px', flexShrink:0 }}>
+                      <button onClick={async()=>{ await fetch('/api/tasks/'+t.id+'/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'approve'})}); loadAll() }}
+                        style={{ background:'var(--green-bg)', border:'1px solid rgba(34,211,160,0.3)', color:'var(--green)', borderRadius:'8px', padding:'7px 14px', fontSize:'12px', fontWeight:'600', cursor:'pointer', fontFamily:"'DM Sans',sans-serif" }}>✓ Approve</button>
+                      <button onClick={async()=>{ await fetch('/api/tasks/'+t.id+'/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'reject'})}); loadAll() }}
+                        style={{ background:'var(--red-bg)', border:'1px solid rgba(244,63,94,0.2)', color:'var(--red)', borderRadius:'8px', padding:'7px 14px', fontSize:'12px', cursor:'pointer', fontFamily:"'DM Sans',sans-serif" }}>✕ Reject</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Activity feed */}
             <div className="card" style={{ padding:'20px' }}>
