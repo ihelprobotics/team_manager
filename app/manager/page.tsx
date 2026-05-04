@@ -38,7 +38,7 @@ const EMPTY_EMP = { name:'', email:'', password:'', avatar_color:'#6c63ff' }
 
 export default function ManagerDashboard() {
   const router = useRouter()
-  const [tab, setTab] = useState<'overview'|'team'|'tasks'|'reports'>('overview')
+  const [tab, setTab] = useState<'overview'|'team'|'tasks'|'reports'|'live'>('overview')
   const [tasks, setTasks] = useState<Task[]>([])
   const [employees, setEmployees] = useState<User[]>([])
   const [activity, setActivity] = useState<Activity[]>([])
@@ -52,14 +52,17 @@ export default function ManagerDashboard() {
   const [saving, setSaving] = useState(false)
   const [managerName, setManagerName] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('All')
+  const [liveSessions, setLiveSessions] = useState<Array<{id:string;started_at:string;activity_score?:number;checkin_count?:number;last_checkin_message?:string;last_checkin_at?:string;last_activity_type?:string;user:{id:string;name:string;avatar_initials:string;avatar_color:string}}>>([])
 
   const loadAll = useCallback(async () => {
-    const [tr,ur,ar] = await Promise.all([
+    const [tr,ur,ar,lr] = await Promise.all([
       fetch('/api/tasks').then(r=>r.json()),
       fetch('/api/users').then(r=>r.json()),
       fetch('/api/activity').then(r=>r.json()),
+      fetch('/api/sessions/checkin').then(r=>r.json()),
     ])
     setTasks(tr.tasks||[]); setEmployees(ur.users||[]); setActivity(ar.activity||[])
+    setLiveSessions(lr.activeSessions||[])
   }, [])
 
   useEffect(() => {
@@ -148,8 +151,8 @@ export default function ManagerDashboard() {
             <span style={{ fontSize:'11px', background:'var(--purple-bg)', color:'var(--purple)', border:'1px solid rgba(167,139,250,0.25)', padding:'2px 8px', borderRadius:'20px', fontWeight:'500' }}>Manager</span>
           </div>
           <nav style={{ display:'flex', gap:'4px' }}>
-            {(['overview','team','tasks','reports'] as const).map(t => (
-              <button key={t} className={`nav-tab ${tab===t?'active':''}`} onClick={()=>setTab(t)} style={{ textTransform:'capitalize' }}>{t}</button>
+            {(['overview','team','tasks','reports','live'] as const).map(t => (
+              <button key={t} className={`nav-tab ${tab===t?'active':''}`} onClick={()=>setTab(t)} style={{ textTransform:'capitalize' }}>{t==='live'?'🔴 Live':t}</button>
             ))}
           </nav>
         </div>
@@ -559,6 +562,100 @@ export default function ManagerDashboard() {
                 )
               })}
             </div>
+          </div>
+        )}
+
+        {/* LIVE MONITORING TAB */}
+        {tab==='live' && (
+          <div className="fade-up">
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'20px' }}>
+              <div>
+                <h2 style={{ fontSize:'18px', fontWeight:'600', color:'var(--text)', marginBottom:'4px' }}>Live Monitoring</h2>
+                <p style={{ fontSize:'13px', color:'var(--text3)' }}>Real-time employee activity — auto-refreshes every 30s</p>
+              </div>
+              <div style={{ display:'flex', alignItems:'center', gap:'8px', background:'var(--red-bg)', border:'1px solid rgba(244,63,94,0.3)', borderRadius:'8px', padding:'6px 12px' }}>
+                <div style={{ width:'7px', height:'7px', borderRadius:'50%', background:'var(--red)' }} className="animate-pulse-dot" />
+                <span style={{ fontSize:'12px', color:'var(--red)', fontWeight:'600' }}>{liveSessions.length} clocked in</span>
+              </div>
+            </div>
+
+            {liveSessions.length===0 ? (
+              <div className="card" style={{ padding:'48px', textAlign:'center' }}>
+                <p style={{ fontSize:'16px', color:'var(--text3)' }}>No employees currently clocked in</p>
+              </div>
+            ) : (
+              <div style={{ display:'flex', flexDirection:'column', gap:'14px' }}>
+                {liveSessions.map(s => {
+                  const elapsed = Math.floor((Date.now()-new Date(s.started_at).getTime())/1000)
+                  const h = Math.floor(elapsed/3600), m = Math.floor((elapsed%3600)/60), sec = elapsed%60
+                  const timeStr = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`
+                  const score = s.activity_score ?? 100
+                  const scoreColor = score>=70?'var(--green)':score>=40?'var(--amber)':'var(--red)'
+                  const isIdle = s.last_activity_type==='idle'
+                  const lastCheckin = s.last_checkin_at ? Math.floor((Date.now()-new Date(s.last_checkin_at).getTime())/60000) : null
+
+                  return (
+                    <div key={s.id} className="card" style={{ padding:'20px', borderLeft:`3px solid ${isIdle?'var(--red)':score<40?'var(--amber)':'var(--green)'}` }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:'16px' }}>
+                        <div style={{ position:'relative' }}>
+                          <div style={{ width:44, height:44, borderRadius:44*0.34, background:s.user.avatar_color+'22', color:s.user.avatar_color, fontSize:44*0.36, fontWeight:600, display:'flex', alignItems:'center', justifyContent:'center', border:`1px solid ${s.user.avatar_color}44` }}>{s.user.avatar_initials}</div>
+                          <div style={{ position:'absolute', bottom:0, right:0, width:'10px', height:'10px', borderRadius:'50%', background:isIdle?'var(--red)':'var(--green)', border:'2px solid var(--bg3)' }} className={isIdle?'':'animate-pulse-dot'} />
+                        </div>
+
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'6px' }}>
+                            <p style={{ fontSize:'15px', fontWeight:'600', color:'var(--text)' }}>{s.user.name}</p>
+                            {isIdle && <span style={{ fontSize:'11px', background:'var(--red-bg)', color:'var(--red)', border:'1px solid rgba(244,63,94,0.25)', padding:'2px 8px', borderRadius:'20px', fontWeight:'500' }} className="animate-pulse-dot">⚠ Idle</span>}
+                            {lastCheckin !== null && lastCheckin > 35 && !isIdle && <span style={{ fontSize:'11px', background:'var(--amber-bg)', color:'var(--amber)', border:'1px solid rgba(245,158,11,0.25)', padding:'2px 8px', borderRadius:'20px' }}>⏰ No check-in for {lastCheckin}m</span>}
+                          </div>
+                          {s.last_checkin_message && (
+                            <p style={{ fontSize:'12px', color:'var(--text3)', marginBottom:'8px', fontStyle:'italic' }}>
+                              Last check-in: &ldquo;{s.last_checkin_message.slice(0,100)}{s.last_checkin_message.length>100?'…':''}&rdquo;
+                              {lastCheckin!==null && <span style={{ marginLeft:'8px', color:'var(--text3)' }}>({lastCheckin}m ago)</span>}
+                            </p>
+                          )}
+
+                          {/* Activity score bar */}
+                          <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+                            <span style={{ fontSize:'11px', color:'var(--text3)', flexShrink:0 }}>Activity score</span>
+                            <div style={{ flex:1, maxWidth:'200px', height:'6px', background:'var(--bg4)', borderRadius:'4px', overflow:'hidden' }}>
+                              <div style={{ height:'100%', width:`${score}%`, background:scoreColor, borderRadius:'4px', transition:'width 0.5s' }} />
+                            </div>
+                            <span style={{ fontSize:'12px', fontWeight:'700', color:scoreColor, fontFamily:"'DM Mono',monospace", flexShrink:0 }}>{score}/100</span>
+                            <span style={{ fontSize:'11px', color:'var(--text3)', flexShrink:0 }}>{s.checkin_count||0} check-in{(s.checkin_count||0)!==1?'s':''}</span>
+                          </div>
+                        </div>
+
+                        <div style={{ textAlign:'right', flexShrink:0 }}>
+                          <p style={{ fontSize:'22px', fontWeight:'700', color:isIdle?'var(--red)':'var(--green)', fontFamily:"'DM Mono',monospace", letterSpacing:'-0.5px' }}>{timeStr}</p>
+                          <p style={{ fontSize:'11px', color:'var(--text3)', marginTop:'2px' }}>session time</p>
+                          <button onClick={()=>{ setSelEmployee(employees.find(e=>e.id===s.user.id)||null); setTab('team') }}
+                            style={{ marginTop:'8px', background:'var(--bg4)', border:'1px solid var(--border)', color:'var(--text3)', borderRadius:'7px', padding:'4px 10px', fontSize:'11px', cursor:'pointer', fontFamily:"'DM Sans',sans-serif" }}>
+                            View tasks →
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Offline employees */}
+            {employees.filter(e=>!liveSessions.find(s=>s.user.id===e.id)).length > 0 && (
+              <div style={{ marginTop:'24px' }}>
+                <p style={{ fontSize:'11px', fontWeight:'600', color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:'12px' }}>Not Clocked In</p>
+                <div style={{ display:'flex', gap:'10px', flexWrap:'wrap' }}>
+                  {employees.filter(e=>!liveSessions.find(s=>s.user.id===e.id)).map(e => (
+                    <div key={e.id} style={{ display:'flex', alignItems:'center', gap:'8px', background:'var(--bg3)', border:'1px solid var(--border)', borderRadius:'10px', padding:'8px 12px' }}>
+                      <div style={{ width:28, height:28, borderRadius:28*0.34, background:e.avatar_color+'22', color:e.avatar_color, fontSize:28*0.36, fontWeight:600, display:'flex', alignItems:'center', justifyContent:'center', border:`1px solid ${e.avatar_color}44` }}>{e.avatar_initials}</div>
+                      <span style={{ fontSize:'13px', color:'var(--text2)' }}>{e.name}</span>
+                      <div style={{ width:'7px', height:'7px', borderRadius:'50%', background:'var(--text3)' }} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>
