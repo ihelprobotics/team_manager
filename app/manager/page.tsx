@@ -161,6 +161,10 @@ export default function ManagerDashboard() {
             <span className="animate-pulse-dot" style={{ color:'var(--red)', fontSize:'12px' }}>⚠</span>
             <span style={{ fontSize:'12px', color:'var(--red)', fontWeight:'500' }}>{attention.length} alerts</span>
           </div>}
+          <button onClick={()=>router.push('/manager/updates')}
+            style={{ background:'var(--bg4)', border:'1px solid var(--border)', color:'var(--text2)', borderRadius:'9px', padding:'7px 14px', fontSize:'13px', cursor:'pointer', fontFamily:"'DM Sans',sans-serif", display:'flex', alignItems:'center', gap:'6px' }}>
+            📋 Team Updates
+          </button>
           <button className="btn-ghost" onClick={()=>setShowAddEmp(true)} style={{ fontSize:'13px', padding:'7px 14px' }}>+ Employee</button>
           <button className="btn-primary" onClick={()=>setShowAddTask(true)} style={{ fontSize:'13px', padding:'8px 16px' }}>+ Task</button>
           <div style={{ width:'1px', height:'20px', background:'var(--border)', margin:'0 4px' }} />
@@ -263,6 +267,18 @@ export default function ManagerDashboard() {
               </div>
             </div>
 
+
+            {/* Quick access to Team Updates */}
+            <div onClick={()=>router.push('/manager/updates')} style={{ background:'linear-gradient(135deg,rgba(108,99,255,0.12),rgba(108,99,255,0.04))', border:'1px solid rgba(108,99,255,0.25)', borderRadius:'16px', padding:'16px 20px', marginBottom:'20px', cursor:'pointer', display:'flex', alignItems:'center', gap:'14px', transition:'all 0.2s' }}
+              onMouseEnter={e=>(e.currentTarget.style.borderColor='rgba(108,99,255,0.5)')}
+              onMouseLeave={e=>(e.currentTarget.style.borderColor='rgba(108,99,255,0.25)')}>
+              <div style={{ width:'40px', height:'40px', borderRadius:'12px', background:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'20px', flexShrink:0 }}>📋</div>
+              <div style={{ flex:1 }}>
+                <p style={{ fontSize:'14px', fontWeight:'600', color:'var(--text)', marginBottom:'3px' }}>Team Updates Feed</p>
+                <p style={{ fontSize:'12px', color:'var(--text3)' }}>Live bullet-point summary of what each team member has worked on today — auto-updates as they chat</p>
+              </div>
+              <span style={{ fontSize:'18px', color:'var(--text3)' }}>→</span>
+            </div>
 
             {/* Pending task approvals */}
             {tasks.filter(t=>t.is_self_created && t.approval_status==='pending').length > 0 && (
